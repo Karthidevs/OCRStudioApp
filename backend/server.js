@@ -71,7 +71,13 @@ async function ocrPdfWithOcrmypdf(inputPath, language = "eng") {
 
   try {
     // Run ocrmypdf
-    const cmd = `ocrmypdf --language ${language} --force-ocr --output-type pdf "${inputPath}" "${outputPath}"`;
+    let cmd;
+    try {
+      await runCommand("ocrmypdf --version");
+      cmd = `ocrmypdf --language ${language} --force-ocr --output-type pdf "${inputPath}" "${outputPath}"`;
+    } catch {
+      cmd = `python3 -m ocrmypdf --language ${language} --force-ocr --output-type pdf "${inputPath}" "${outputPath}"`;
+    }
     await runCommand(cmd);
 
     // Extract text from OCR'd PDF
@@ -117,7 +123,7 @@ async function ocrPdfWithPython(inputPath, language = "eng") {
   const outputBase = path.join(OUTPUT_DIR, uuidv4());
   const scriptPath = path.join(__dirname, "pdf_ocr.py");
   try {
-    const cmd = `python "${scriptPath}" "${inputPath}" "${outputBase}" ${language}`;
+    const cmd = `python3 "${scriptPath}" "${inputPath}" "${outputBase}" ${language}`;
     await runCommand(cmd);
     const txtPath = `${outputBase}.txt`;
     if (fs.existsSync(txtPath)) {
