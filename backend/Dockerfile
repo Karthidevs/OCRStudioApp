@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM node:18-bullseye
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -8,8 +8,6 @@ RUN apt-get update && apt-get install -y \
     poppler-utils \
     python3 \
     python3-pip \
-    nodejs \
-    npm \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python packages
