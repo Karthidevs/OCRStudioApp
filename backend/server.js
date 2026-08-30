@@ -6,6 +6,19 @@ const path = require("path");
 const fs = require("fs");
 const { v4: uuidv4 } = require("uuid");
 
+// Install system tools on startup (for Render)
+const { execSync } = require("child_process");
+try {
+  execSync("tesseract --version", { stdio: "ignore" });
+} catch {
+  console.log("Installing tesseract...");
+  try {
+    execSync("apt-get install -y tesseract-ocr poppler-utils", {
+      stdio: "inherit",
+    });
+  } catch {}
+}
+
 const app = express();
 const PORT = 5000;
 
@@ -25,18 +38,28 @@ const storage = multer.diskStorage({
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname);
     cb(null, `${uuidv4()}${ext}`);
-  }
+  },
 });
 
 const upload = multer({
   storage,
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
   fileFilter: (req, file, cb) => {
-    const allowed = [".pdf", ".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp", ".webp", ".gif"];
+    const allowed = [
+      ".pdf",
+      ".jpg",
+      ".jpeg",
+      ".png",
+      ".tiff",
+      ".tif",
+      ".bmp",
+      ".webp",
+      ".gif",
+    ];
     const ext = path.extname(file.originalname).toLowerCase();
     if (allowed.includes(ext)) cb(null, true);
     else cb(new Error("Unsupported file format"));
-  }
+  },
 });
 
 // ── Helper: run command ───────────────────────────────────────────────────────
@@ -51,16 +74,40 @@ function runCommand(cmd) {
 
 // ── Helper: cleanup files ─────────────────────────────────────────────────────
 function cleanup(...files) {
-  files.forEach(f => { try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch {} });
+  files.forEach((f) => {
+    try {
+      if (fs.existsSync(f)) fs.unlinkSync(f);
+    } catch {}
+  });
 }
 
 // ── Check tools availability ──────────────────────────────────────────────────
 async function checkTools() {
   const tools = {};
-  try { await runCommand("ocrmypdf --version"); tools.ocrmypdf = true; } catch { tools.ocrmypdf = false; }
-  try { await runCommand("tesseract --version"); tools.tesseract = true; } catch { tools.tesseract = false; }
-  try { await runCommand("pdftotext -v"); tools.pdftotext = true; } catch { tools.pdftotext = false; }
-  try { await runCommand("python3 --version"); tools.python3 = true; } catch { tools.python3 = false; }
+  try {
+    await runCommand("ocrmypdf --version");
+    tools.ocrmypdf = true;
+  } catch {
+    tools.ocrmypdf = false;
+  }
+  try {
+    await runCommand("tesseract --version");
+    tools.tesseract = true;
+  } catch {
+    tools.tesseract = false;
+  }
+  try {
+    await runCommand("pdftotext -v");
+    tools.pdftotext = true;
+  } catch {
+    tools.pdftotext = false;
+  }
+  try {
+    await runCommand("python3 --version");
+    tools.python3 = true;
+  } catch {
+    tools.python3 = false;
+  }
   return tools;
 }
 
@@ -90,7 +137,9 @@ async function ocrPdfWithOcrmypdf(inputPath, language = "eng") {
 async function ocrImageWithTesseract(inputPath, language = "eng") {
   const outputBase = path.join(OUTPUT_DIR, uuidv4());
   try {
-    await runCommand(`tesseract "${inputPath}" "${outputBase}" -l ${language} --psm 6`);
+    await runCommand(
+      `tesseract "${inputPath}" "${outputBase}" -l ${language} --psm 6`,
+    );
     const txtPath = `${outputBase}.txt`;
     const text = fs.readFileSync(txtPath, "utf8");
     cleanup(txtPath);
@@ -107,9 +156,12 @@ async function extractPdfText(inputPath) {
     await runCommand(`pdftotext "${inputPath}" "${txtPath}"`);
     const text = fs.readFileSync(txtPath, "utf8");
     cleanup(txtPath);
-    if (text.trim().length > 50) return { text: text.trim(), method: "pdftotext" };
+    if (text.trim().length > 50)
+      return { text: text.trim(), method: "pdftotext" };
     return null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 // ── OCR PDF using python + tesseract page by page ─────────────────────────────
@@ -133,11 +185,14 @@ async function ocrPdfWithPython(inputPath, language = "eng") {
 
 // ── Parse table structure from text ──────────────────────────────────────────
 function parseTableData(text) {
-  const lines = text.split("\n").filter(l => l.trim().length > 1);
+  const lines = text.split("\n").filter((l) => l.trim().length > 1);
   const rows = [];
 
-  lines.forEach(line => {
-    const parts = line.split(/\s{2,}/).map(p => p.trim()).filter(Boolean);
+  lines.forEach((line) => {
+    const parts = line
+      .split(/\s{2,}/)
+      .map((p) => p.trim())
+      .filter(Boolean);
     if (parts.length >= 2) {
       rows.push({ field: parts[0], value: parts.slice(1).join(" ") });
     } else if (parts.length === 1 && line.includes(":")) {
@@ -199,9 +254,8 @@ app.post("/api/ocr", upload.single("file"), async (req, res) => {
       tableData,
       wordCount: result.text.trim().split(/\s+/).filter(Boolean).length,
       charCount: result.text.length,
-      lineCount: result.text.split("\n").filter(l => l.trim()).length,
+      lineCount: result.text.split("\n").filter((l) => l.trim()).length,
     });
-
   } catch (err) {
     cleanup(inputPath);
     res.status(500).json({ error: err.message || "OCR failed" });
@@ -217,7 +271,9 @@ app.post("/api/ocr/pdf-pages", upload.single("file"), async (req, res) => {
 
   try {
     // Get page count
-    const pageCountOutput = await runCommand(`pdfinfo "${inputPath}" | grep "Pages:"`);
+    const pageCountOutput = await runCommand(
+      `pdfinfo "${inputPath}" | grep "Pages:"`,
+    );
     const pageCount = parseInt(pageCountOutput.match(/\d+/)?.[0] || "1");
 
     // Extract text from all pages
@@ -225,7 +281,9 @@ app.post("/api/ocr/pdf-pages", upload.single("file"), async (req, res) => {
     for (let i = 1; i <= pageCount; i++) {
       const txtPath = path.join(OUTPUT_DIR, `${uuidv4()}_page${i}.txt`);
       try {
-        await runCommand(`pdftotext -f ${i} -l ${i} "${inputPath}" "${txtPath}"`);
+        await runCommand(
+          `pdftotext -f ${i} -l ${i} "${inputPath}" "${txtPath}"`,
+        );
         const text = fs.readFileSync(txtPath, "utf8").trim();
         pages.push({ page: i, text, tableData: parseTableData(text) });
         cleanup(txtPath);
@@ -236,7 +294,6 @@ app.post("/api/ocr/pdf-pages", upload.single("file"), async (req, res) => {
 
     cleanup(inputPath);
     res.json({ success: true, pageCount, pages });
-
   } catch (err) {
     cleanup(inputPath);
     res.status(500).json({ error: err.message });
@@ -245,7 +302,7 @@ app.post("/api/ocr/pdf-pages", upload.single("file"), async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`OCR Backend running on http://localhost:${PORT}`);
-  checkTools().then(tools => {
+  checkTools().then((tools) => {
     console.log("Available tools:", tools);
   });
 });
