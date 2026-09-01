@@ -33,3 +33,5 @@ EXPOSE 5000
 
 # Start server
 CMD ["node", "server.js"]
+
+RUN ln -s /usr/bin/python3 /usr/bin/python
