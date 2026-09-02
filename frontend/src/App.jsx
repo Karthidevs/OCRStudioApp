@@ -24,7 +24,7 @@ async function ocrViaBackend(file, language) {
   formData.append("file", file);
   formData.append("language", language);
 
-  const res = await fetch("/api/ocr", { method: "POST", body: formData });
+  
   if (!res.ok) {
     const err = await res.json();
     throw new Error(err.error || "Backend OCR failed");
@@ -139,7 +139,7 @@ export default function App() {
   // ── Check backend ─────────────────────────────────────────────────────────
   const checkBackend = useCallback(async () => {
     try {
-      const res = await fetch("/api/health");
+      const res = await fetch(`${BACKEND_URL}/api/health`);
       const data = await res.json();
       setBackendAvailable(data.tools);
       return data.tools;
