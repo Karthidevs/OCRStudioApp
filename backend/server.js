@@ -122,17 +122,49 @@ async function extractPdfText(inputPath) {
 async function ocrPdfWithPython(inputPath, language = "eng") {
   const outputBase = path.join(OUTPUT_DIR, uuidv4());
   const scriptPath = path.join(__dirname, "pdf_ocr.py");
+  const txtPath = `${outputBase}.txt`;
   try {
     const cmd = `python3 "${scriptPath}" "${inputPath}" "${outputBase}" ${language}`;
     await runCommand(cmd);
-    const txtPath = `${outputBase}.txt`;
     if (fs.existsSync(txtPath)) {
       const text = fs.readFileSync(txtPath, "utf8");
       cleanup(txtPath);
-      return { text: text.trim(), method: "python-pdf-ocr" };
+      if (text.trim().length > 0) {
+        return { text: text.trim(), method: "python-pdf-ocr" };
+      }
     }
-    throw new Error("Python OCR output not found");
+    throw new Error("No text could be extracted from this PDF");
   } catch (err) {
+    cleanup(txtPath);
+    throw new Error("PDF OCR failed: " + err.message);
+  }
+}
+
+// ── OCR PDF using tesseract directly on each page image ───────────────────────
+async function ocrPdfWithTesseractDirect(inputPath, language = "eng") {
+  // Convert PDF pages to images using ghostscript
+  const outputDir = path.join(OUTPUT_DIR, uuidv4());
+  fs.mkdirSync(outputDir, { recursive: true });
+  try {
+    // Try ghostscript
+    await runCommand(`gs -dNOPAUSE -dBATCH -sDEVICE=pnggray -r300 -sOutputFile="${outputDir}/page-%03d.png" "${inputPath}"`);
+    const pages = fs.readdirSync(outputDir).filter(f => f.endsWith(".png")).sort();
+    const texts = [];
+    for (const page of pages) {
+      const imgPath = path.join(outputDir, page);
+      const outBase = path.join(OUTPUT_DIR, uuidv4());
+      try {
+        await runCommand(`tesseract "${imgPath}" "${outBase}" -l ${language} --psm 6`);
+        const txt = fs.readFileSync(`${outBase}.txt`, "utf8");
+        texts.push(txt);
+        cleanup(`${outBase}.txt`);
+      } catch {}
+      cleanup(imgPath);
+    }
+    fs.rmdirSync(outputDir, { recursive: true });
+    return { text: texts.join("\n\n"), method: "ghostscript-tesseract" };
+  } catch (err) {
+    try { fs.rmdirSync(outputDir, { recursive: true }); } catch {}
     throw err;
   }
 }
@@ -177,17 +209,26 @@ app.post("/api/ocr", upload.single("file"), async (req, res) => {
     let result;
 
     if (isPdf) {
-      // Try direct text extraction first (pdftotext)
+      // Method 1: pdftotext (fastest - digital PDFs)
       const direct = await extractPdfText(inputPath);
-      if (direct) {
+      if (direct && direct.text.length > 50) {
         result = direct;
       } else {
-        // Try ocrmypdf
+        // Method 2: ocrmypdf (scanned PDFs)
         try {
           result = await ocrPdfWithOcrmypdf(inputPath, language);
-        } catch {
-          // Fallback to python+tesseract page by page
-          result = await ocrPdfWithPython(inputPath, language);
+        } catch (e1) {
+          // Method 3: python pdf2image + tesseract
+          try {
+            result = await ocrPdfWithPython(inputPath, language);
+          } catch (e2) {
+            // Method 4: ghostscript + tesseract
+            try {
+              result = await ocrPdfWithTesseractDirect(inputPath, language);
+            } catch (e3) {
+              throw new Error("All PDF OCR methods failed. Please ensure tesseract and ocrmypdf are installed.");
+            }
+          }
         }
       }
     } else {
