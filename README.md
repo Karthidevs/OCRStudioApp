@@ -3,6 +3,7 @@
 ## Install System Dependencies
 
 ### Ubuntu/Debian:
+
 ```bash
 # Tesseract OCR
 sudo apt-get install tesseract-ocr
@@ -21,18 +22,21 @@ pip install ocrmypdf
 ```
 
 ### Windows:
+
 ```bash
 # Install Tesseract from: https://github.com/UB-Mannheim/tesseract/wiki
 # Add to PATH
 
 # Install poppler from: https://github.com/oschwartz10612/poppler-windows
 # Add bin folder to PATH
+cd ..
 
 # Install ocrmypdf
 pip install ocrmypdf
 ```
 
 ### Mac:
+
 ```bash
 brew install tesseract
 brew install poppler
@@ -42,6 +46,7 @@ pip install ocrmypdf
 ## Run the App
 
 ### Terminal 1 — Backend:
+
 ```bash
 cd backend
 npm install
@@ -49,6 +54,7 @@ node server.js
 ```
 
 ### Terminal 2 — Frontend:
+
 ```bash
 cd frontend
 npm install
