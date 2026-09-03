@@ -169,6 +169,24 @@ async function ocrPdfWithTesseractDirect(inputPath, language = "eng") {
   }
 }
 
+// ── Extract tables from PDF using pdfplumber via python ───────────────────────
+async function extractTablesFromPdf(inputPath) {
+  const scriptPath = path.join(__dirname, "extract_tables.py");
+  const outputPath = path.join(OUTPUT_DIR, uuidv4() + ".json");
+  try {
+    await runCommand(`python3 "${scriptPath}" "${inputPath}" "${outputPath}"`);
+    if (fs.existsSync(outputPath)) {
+      const data = JSON.parse(fs.readFileSync(outputPath, "utf8"));
+      cleanup(outputPath);
+      return data;
+    }
+  } catch (e) {
+    console.log("Table extraction failed:", e.message);
+    cleanup(outputPath);
+  }
+  return null;
+}
+
 // ── Parse table structure from text ──────────────────────────────────────────
 function parseTableData(text) {
   const lines = text.split("\n").filter(l => l.trim().length > 1);
