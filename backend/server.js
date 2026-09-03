@@ -236,7 +236,19 @@ app.post("/api/ocr", upload.single("file"), async (req, res) => {
       result = await ocrImageWithTesseract(inputPath, language);
     }
 
-    const tableData = parseTableData(result.text);
+    // Try smart table extraction for PDFs
+    let tableData = [];
+    if (isPdf) {
+      const smartTables = await extractTablesFromPdf(inputPath);
+      if (smartTables && smartTables.length > 0) {
+        tableData = smartTables;
+      } else {
+        tableData = parseTableData(result.text);
+      }
+    } else {
+      tableData = parseTableData(result.text);
+    }
+
     cleanup(inputPath);
 
     res.json({
