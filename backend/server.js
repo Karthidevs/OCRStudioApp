@@ -189,18 +189,76 @@ async function extractTablesFromPdf(inputPath) {
 
 // ── Parse table structure from text ──────────────────────────────────────────
 function parseTableData(text) {
-  const lines = text.split("\n").filter(l => l.trim().length > 1);
   const rows = [];
+  const skipWords = ["field", "dummy value", "value", "description", "details", "sl.no", "s.no", "#", "label"];
+  const lines = text.split("\n");
 
+  // Step 1 — Try tab separated
+  const tabLines = lines.filter(l => l.includes("\t") && l.trim().length > 2);
+  if (tabLines.length > 1) {
+    tabLines.forEach(line => {
+      const parts = line.split("\t").map(p => p.trim()).filter(Boolean);
+      if (parts.length >= 2 && !skipWords.includes(parts[0].toLowerCase())) {
+        rows.push({ field: parts[0], value: parts.slice(1).join(" | ") });
+      }
+    });
+    if (rows.length > 0) return rows;
+  }
+
+  // Step 2 — Detect if lines alternate between field and value (Tesseract table pattern)
+  // Tesseract often outputs: "Field Name\nField Value\nNext Field\nNext Value"
+  const nonEmptyLines = lines.map(l => l.trim()).filter(l => l.length > 1);
+  
+  // Check if every other line could be field:value pairs
+  let alternateScore = 0;
+  for (let i = 0; i < nonEmptyLines.length - 1; i += 2) {
+    const a = nonEmptyLines[i];
+    const b = nonEmptyLines[i + 1];
+    // Field lines are usually shorter than value lines or similar length
+    if (a.length < 60 && b.length > 0) alternateScore++;
+  }
+
+  if (alternateScore > nonEmptyLines.length / 4) {
+    // Try pairing consecutive lines as field:value
+    for (let i = 0; i < nonEmptyLines.length - 1; i += 2) {
+      const field = nonEmptyLines[i];
+      const value = nonEmptyLines[i + 1];
+      if (!skipWords.includes(field.toLowerCase()) && field.length < 60 && value.length > 0) {
+        rows.push({ field, value });
+      }
+    }
+    if (rows.length > 2) return rows;
+  }
+
+  // Step 3 — Multi-space separator (pdftotext style)
+  lines.forEach(line => {
+    const parts = line.split(/\s{3,}/).map(p => p.trim()).filter(Boolean);
+    if (parts.length >= 2 && !skipWords.includes(parts[0].toLowerCase())) {
+      rows.push({ field: parts[0], value: parts.slice(1).join(" ") });
+    }
+  });
+  if (rows.length > 0) return rows;
+
+  // Step 4 — Two-space separator
   lines.forEach(line => {
     const parts = line.split(/\s{2,}/).map(p => p.trim()).filter(Boolean);
-    if (parts.length >= 2) {
+    if (parts.length >= 2 && !skipWords.includes(parts[0].toLowerCase()) && parts[0].length < 50) {
       rows.push({ field: parts[0], value: parts.slice(1).join(" ") });
-    } else if (parts.length === 1 && line.includes(":")) {
-      const colonIdx = line.indexOf(":");
-      const field = line.substring(0, colonIdx).trim();
-      const value = line.substring(colonIdx + 1).trim();
-      if (field && value) rows.push({ field, value });
+    }
+  });
+  if (rows.length > 0) return rows;
+
+  // Step 5 — Colon separator
+  lines.forEach(line => {
+    const trimmed = line.trim();
+    if (trimmed.length < 2) return;
+    const colonIdx = trimmed.indexOf(":");
+    if (colonIdx > 0 && colonIdx < 60) {
+      const field = trimmed.substring(0, colonIdx).trim();
+      const value = trimmed.substring(colonIdx + 1).trim();
+      if (field.length > 1 && value.length > 0 && !skipWords.includes(field.toLowerCase())) {
+        rows.push({ field, value });
+      }
     }
   });
 
@@ -254,17 +312,19 @@ app.post("/api/ocr", upload.single("file"), async (req, res) => {
       result = await ocrImageWithTesseract(inputPath, language);
     }
 
-    // Try smart table extraction for PDFs
-    let tableData = [];
+    // Smart table extraction
+    let tableData = parseTableData(result.text);
+
+    // For PDFs also try pdfplumber for better table detection
     if (isPdf) {
-      const smartTables = await extractTablesFromPdf(inputPath);
-      if (smartTables && smartTables.length > 0) {
-        tableData = smartTables;
-      } else {
-        tableData = parseTableData(result.text);
+      try {
+        const smartTables = await extractTablesFromPdf(inputPath);
+        if (smartTables && smartTables.length > 0) {
+          tableData = smartTables;
+        }
+      } catch (e) {
+        console.log("Smart table extraction failed, using text parser");
       }
-    } else {
-      tableData = parseTableData(result.text);
     }
 
     cleanup(inputPath);
